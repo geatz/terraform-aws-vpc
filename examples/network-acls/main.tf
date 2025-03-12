@@ -1,56 +1,22 @@
 provider "aws" {
-  region = "eu-west-1"
+  region = local.region
 }
 
-module "vpc" {
-  source = "../../"
-
-  name = "network-acls-example"
-
-  cidr = "10.0.0.0/16"
-
-  azs                 = ["eu-west-1a", "eu-west-1b", "eu-west-1c"]
-  private_subnets     = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
-  public_subnets      = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
-  elasticache_subnets = ["10.0.201.0/24", "10.0.202.0/24", "10.0.203.0/24"]
-
-  public_dedicated_network_acl = true
-  public_inbound_acl_rules = concat(
-    local.network_acls["default_inbound"],
-    local.network_acls["public_inbound"],
-  )
-  public_outbound_acl_rules = concat(
-    local.network_acls["default_outbound"],
-    local.network_acls["public_outbound"],
-  )
-  elasticache_outbound_acl_rules = concat(
-    local.network_acls["default_outbound"],
-    local.network_acls["elasticache_outbound"],
-  )
-
-  private_dedicated_network_acl     = true
-  elasticache_dedicated_network_acl = true
-
-  enable_ipv6 = true
-
-  enable_nat_gateway = false
-  single_nat_gateway = true
-
-  public_subnet_tags = {
-    Name = "overridden-name-public"
-  }
-
-  tags = {
-    Owner       = "user"
-    Environment = "dev"
-  }
-
-  vpc_tags = {
-    Name = "vpc-name"
-  }
-}
+data "aws_availability_zones" "available" {}
 
 locals {
+  name   = "ex-${basename(path.cwd)}"
+  region = "eu-west-1"
+
+  vpc_cidr = "10.0.0.0/16"
+  azs      = slice(data.aws_availability_zones.available.names, 0, 3)
+
+  tags = {
+    Example    = local.name
+    GithubRepo = "terraform-aws-vpc"
+    GithubOrg  = "terraform-aws-modules"
+  }
+
   network_acls = {
     default_inbound = [
       {
@@ -201,3 +167,43 @@ locals {
   }
 }
 
+################################################################################
+# VPC Module
+################################################################################
+
+module "vpc" {
+  source = "../../"
+
+  name = local.name
+  cidr = local.vpc_cidr
+
+  azs                 = local.azs
+  private_subnets     = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k)]
+  public_subnets      = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 4)]
+  elasticache_subnets = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 8)]
+
+  public_dedicated_network_acl   = true
+  public_inbound_acl_rules       = concat(local.network_acls["default_inbound"], local.network_acls["public_inbound"])
+  public_outbound_acl_rules      = concat(local.network_acls["default_outbound"], local.network_acls["public_outbound"])
+  elasticache_outbound_acl_rules = concat(local.network_acls["default_outbound"], local.network_acls["elasticache_outbound"])
+
+  private_dedicated_network_acl     = false
+  elasticache_dedicated_network_acl = true
+
+  manage_default_network_acl = true
+
+  enable_ipv6 = true
+
+  enable_nat_gateway = false
+  single_nat_gateway = true
+
+  public_subnet_tags = {
+    Name = "overridden-name-public"
+  }
+
+  tags = local.tags
+
+  vpc_tags = {
+    Name = "vpc-name"
+  }
+}
